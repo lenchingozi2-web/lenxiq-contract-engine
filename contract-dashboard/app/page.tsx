@@ -20,7 +20,7 @@ export default function Dashboard() {
     { id: 4, contract: "TechCorp NDA", description: "Renew Annual License", due: "2026-10-31", status: "UPCOMING" }
   ];
 
-  const getStatusColor = (status) => {
+  const getStatusColor = (status: string) => {
     switch (status) {
       case 'OVERDUE': return 'bg-red-100 text-red-800 border-red-200';
       case 'UPCOMING': return 'bg-blue-100 text-blue-800 border-blue-200';
