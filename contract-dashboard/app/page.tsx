@@ -1,142 +1,170 @@
 "use client";
 
-import { useState } from "react";
-import { FileText, AlertTriangle, CheckCircle, Clock, Calendar, Upload } from "lucide-react";
+import { useEffect, useState } from "react";
+import {
+	AlertTriangle,
+	Calendar,
+	CheckCircle,
+	Clock,
+	FileText,
+	Upload,
+} from "lucide-react";
 import Link from "next/link";
 
-export default function Dashboard() {
-	// Member 1's Live Webhook URL
-	const webhookUrl = "https://martin7animashaun.app.n8n.cloud/webhook/contract-upload";
+type Obligation = {
+	id: string | number;
+	contract_id?: string;
+	description?: string;
+	task?: string;
+	due_date?: string;
+	deadline?: string;
+	status?: string;
+};
 
-	const handleFileUpload = async (event: any) => {
-		const file = event.target.files[0];
+type Kpis = {
+	totalContracts: number;
+	activeObligations: number;
+	dueThisWeek: number;
+	overdue: number;
+	completed: number;
+};
+
+const initialKpis: Kpis = {
+	totalContracts: 0,
+	activeObligations: 0,
+	dueThisWeek: 0,
+	overdue: 0,
+	completed: 0,
+};
+
+export default function Dashboard() {
+	const [obligations, setObligations] = useState<Obligation[]>([]);
+	const [kpis, setKpis] = useState<Kpis>(initialKpis);
+	const [loading, setLoading] = useState(true);
+	const webhookUrl = "https://martin7animashaun.app.n8n.cloud/webhook/contract-upload";
+	const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+	const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+
+	useEffect(() => {
+		const fetchLiveObligations = async () => {
+			if (!supabaseUrl || !supabaseKey) {
+				setLoading(false);
+				return;
+			}
+
+			try {
+				const response = await fetch(`${supabaseUrl}/rest/v1/obligations?select=*`, {
+					headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
+				});
+				if (!response.ok) throw new Error("Unable to fetch obligations");
+				const data: unknown = await response.json();
+
+				if (Array.isArray(data)) {
+					const rows = data as Obligation[];
+					const completed = rows.filter((ob) => ob.status?.toUpperCase() === "COMPLETED").length;
+					setObligations(rows);
+					setKpis({
+						totalContracts: new Set(rows.map((ob) => ob.contract_id).filter(Boolean)).size,
+						activeObligations: rows.length - completed,
+						dueThisWeek: rows.filter((ob) => ob.status?.toUpperCase() === "UPCOMING").length,
+						overdue: rows.filter((ob) => ob.status?.toUpperCase() === "OVERDUE").length,
+						completed,
+					});
+				}
+			} catch (error) {
+				console.error("Error fetching Supabase data:", error);
+			} finally {
+				setLoading(false);
+			}
+		};
+
+		fetchLiveObligations();
+	}, [supabaseKey, supabaseUrl]);
+
+	const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+		const file = event.target.files?.[0];
 		if (!file) return;
 
 		const formData = new FormData();
 		formData.append("file", file);
-
 		try {
-			await fetch(webhookUrl, {
-				method: "POST",
-				body: formData,
-			});
+			const response = await fetch(webhookUrl, { method: "POST", body: formData });
+			if (!response.ok) throw new Error("Upload failed");
 			alert("Contract sent successfully to Member 1's AI Engine!");
-		} catch (error) {
+		} catch {
 			alert("Error uploading contract.");
+		} finally {
+			event.target.value = "";
 		}
 	};
 
-	// Mock Data: You will replace this with Supabase fetches later
-	const mockKPIs = {
-		totalContracts: 12,
-		activeObligations: 8,
-		dueThisWeek: 3,
-		overdue: 1,
-		completed: 45
-	};
-
-	const mockObligations = [
-		{ id: 1, contract: "ABC - XYZ Service Agreement", description: "Equipment delivery", due: "2026-10-21", status: "UPCOMING" },
-		{ id: 2, contract: "DEF/GHI License Setup", description: "Payment of ₦5,000,000", due: "2026-10-05", status: "OVERDUE" },
-		{ id: 3, contract: "Vendor Alpha Supply", description: "Submit SLA Report", due: "2026-10-08", status: "PENDING" },
-		{ id: 4, contract: "TechCorp NDA", description: "Renew Annual License", due: "2026-10-31", status: "UPCOMING" }
-	];
-
-	const getStatusColor = (status: string) => {
-		switch (status) {
-			case 'OVERDUE': return 'bg-red-100 text-red-800 border-red-200';
-			case 'UPCOMING': return 'bg-blue-100 text-blue-800 border-blue-200';
-			case 'PENDING': return 'bg-gray-100 text-gray-800 border-gray-200';
-			case 'ESCALATED': return 'bg-orange-100 text-orange-800 border-orange-200';
-			case 'DUE': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-			case 'COMPLETED': return 'bg-green-100 text-green-800 border-green-200';
-			default: return 'bg-gray-100 text-gray-800';
+	const getStatusColor = (status?: string) => {
+		switch (status?.toUpperCase()) {
+			case "OVERDUE": return "bg-red-100 text-red-800 border-red-200";
+			case "UPCOMING": return "bg-blue-100 text-blue-800 border-blue-200";
+			case "PENDING": return "bg-gray-100 text-gray-800 border-gray-200";
+			case "ESCALATED": return "bg-orange-100 text-orange-800 border-orange-200";
+			case "DUE": return "bg-yellow-100 text-yellow-800 border-yellow-200";
+			case "COMPLETED": return "bg-green-100 text-green-800 border-green-200";
+			default: return "bg-gray-100 text-gray-800 border-gray-200";
 		}
 	};
+
+	const cards = [
+		[FileText, "TOTAL CONTRACTS", kpis.totalContracts, "text-blue-500"],
+		[Clock, "ACTIVE OBLIGATIONS", kpis.activeObligations, "text-purple-500"],
+		[Calendar, "DUE THIS WEEK", kpis.dueThisWeek, "text-yellow-500"],
+		[AlertTriangle, "OVERDUE", kpis.overdue, "text-red-500"],
+		[CheckCircle, "COMPLETED", kpis.completed, "text-green-500"],
+	] as const;
 
 	return (
-		<div className="min-h-screen bg-gray-50 p-8 font-sans">
-			<div className="max-w-7xl mx-auto space-y-8">
-				<div className="flex justify-between items-center">
+		<main className="min-h-screen bg-gray-50 p-8 font-sans">
+			<div className="mx-auto max-w-7xl space-y-8">
+				<header className="flex items-center justify-between">
 					<div>
 						<h1 className="text-3xl font-bold text-gray-900">Contract Intelligence Dashboard</h1>
-						<p className="text-gray-500 mt-1">Group 10 Compliance & Obligation Monitoring Engine</p>
+						<p className="mt-1 text-gray-500">Group 10 Compliance &amp; Obligation Monitoring Engine</p>
 					</div>
-					<div>
-						<label className="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium flex items-center transition-colors">
-							<Upload className="w-5 h-5 mr-2" />
-							Upload Contract
-							<input type="file" className="hidden" onChange={handleFileUpload} accept=".pdf,.doc,.docx" />
-						</label>
-					</div>
-				</div>
+					<label className="flex cursor-pointer items-center rounded-lg bg-blue-600 px-4 py-2 font-medium text-white transition-colors hover:bg-blue-700">
+						<Upload className="mr-2 h-5 w-5" /> Upload Contract
+						<input type="file" className="hidden" onChange={handleFileUpload} accept=".pdf,.doc,.docx" />
+					</label>
+				</header>
 
-				<div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-					<div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center text-center">
-						<FileText className="w-8 h-8 text-blue-500 mb-2" />
-						<p className="text-sm text-gray-500 font-medium">TOTAL CONTRACTS</p>
-						<p className="text-2xl font-bold text-gray-900">{mockKPIs.totalContracts}</p>
-					</div>
-					<div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center text-center">
-						<Clock className="w-8 h-8 text-purple-500 mb-2" />
-						<p className="text-sm text-gray-500 font-medium">ACTIVE OBLIGATIONS</p>
-						<p className="text-2xl font-bold text-gray-900">{mockKPIs.activeObligations}</p>
-					</div>
-					<div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center text-center">
-						<Calendar className="w-8 h-8 text-yellow-500 mb-2" />
-						<p className="text-sm text-gray-500 font-medium">DUE THIS WEEK</p>
-						<p className="text-2xl font-bold text-gray-900">{mockKPIs.dueThisWeek}</p>
-					</div>
-					<div className="bg-white p-6 rounded-xl shadow-sm border border-red-100 flex flex-col items-center text-center">
-						<AlertTriangle className="w-8 h-8 text-red-500 mb-2" />
-						<p className="text-sm text-red-500 font-medium">OVERDUE</p>
-						<p className="text-2xl font-bold text-red-700">{mockKPIs.overdue}</p>
-					</div>
-					<div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center text-center">
-						<CheckCircle className="w-8 h-8 text-green-500 mb-2" />
-						<p className="text-sm text-gray-500 font-medium">COMPLETED</p>
-						<p className="text-2xl font-bold text-gray-900">{mockKPIs.completed}</p>
-					</div>
-				</div>
+				<section className="grid grid-cols-1 gap-4 md:grid-cols-5">
+					{cards.map(([Icon, label, value, color]) => (
+						<div key={label} className="flex flex-col items-center rounded-xl border border-gray-100 bg-white p-6 text-center shadow-sm">
+							<Icon className={`mb-2 h-8 w-8 ${color}`} />
+							<p className="text-sm font-medium text-gray-500">{label}</p>
+							<p className="text-2xl font-bold text-gray-900">{value}</p>
+						</div>
+					))}
+				</section>
 
-				<div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-					<div className="p-6 border-b border-gray-100">
-						<h2 className="text-lg font-semibold text-gray-900">Current & Upcoming Obligations</h2>
-					</div>
+				<section className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
+					<div className="border-b border-gray-100 p-6"><h2 className="text-lg font-semibold text-gray-900">Live Obligations Tracker</h2></div>
 					<div className="overflow-x-auto">
-						<table className="w-full text-left border-collapse">
-							<thead>
-								<tr className="bg-gray-50 border-b border-gray-100 text-sm text-gray-500">
-									<th className="p-4 font-medium">Contract</th>
-									<th className="p-4 font-medium">Obligation</th>
-									<th className="p-4 font-medium">Due Date</th>
-									<th className="p-4 font-medium">Status</th>
-									<th className="p-4 font-medium">Action</th>
-								</tr>
-							</thead>
+						<table className="w-full border-collapse text-left">
+							<thead><tr className="border-b border-gray-100 bg-gray-50 text-sm text-gray-500">
+								{['Reference ID', 'Obligation Task', 'Deadline', 'Current Status', 'Action'].map((heading) => <th key={heading} className="p-4 font-medium">{heading}</th>)}
+							</tr></thead>
 							<tbody className="divide-y divide-gray-100">
-								{mockObligations.map((ob) => (
-									<tr key={ob.id} className="hover:bg-gray-50 transition-colors">
-										<td className="p-4 text-sm font-medium text-gray-900">{ob.contract}</td>
-										<td className="p-4 text-sm text-gray-600">{ob.description}</td>
-										<td className="p-4 text-sm text-gray-600">{ob.due}</td>
-										<td className="p-4">
-											<span className={`text-xs font-semibold px-3 py-1 rounded-full border ${getStatusColor(ob.status)}`}>
-												{ob.status}
-											</span>
-										</td>
-										<td className="p-4">
-											<Link href={`/contract/${ob.id}`} className="text-sm text-blue-600 hover:text-blue-800 font-medium">
-												View Details
-											</Link>
-										</td>
-									</tr>
-								))}
+								{loading ? <tr><td colSpan={5} className="p-8 text-center text-gray-500">Syncing with Member 3&apos;s Database...</td></tr> : obligations.length === 0 ? <tr><td colSpan={5} className="p-8 text-center text-gray-500">No live obligations found. Use the Upload Contract button above to trigger Member 1&apos;s AI Engine.</td></tr> : obligations.map((ob) => {
+									const reference = ob.contract_id || `SYS-${ob.id}`;
+									return <tr key={ob.id} className="transition-colors hover:bg-gray-50">
+										<td className="p-4 text-sm font-medium text-gray-900">{reference}</td>
+										<td className="p-4 text-sm text-gray-600">{ob.description || ob.task || "—"}</td>
+										<td className="p-4 text-sm text-gray-600">{ob.due_date || ob.deadline || "Pending Calc"}</td>
+										<td className="p-4"><span className={`rounded-full border px-3 py-1 text-xs font-semibold ${getStatusColor(ob.status)}`}>{ob.status || "PENDING"}</span></td>
+										<td className="p-4"><Link href={`/contract/${reference}`} className="text-sm font-medium text-blue-600 hover:text-blue-800">View Log</Link></td>
+									</tr>;
+								})}
 							</tbody>
 						</table>
 					</div>
-				</div>
+				</section>
 			</div>
-		</div>
+		</main>
 	);
 }
