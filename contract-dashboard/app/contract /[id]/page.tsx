@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, FileText, CheckCircle, AlertTriangle, Clock, Activity } from "lucide-react";
+import { ArrowLeft, FileText, Clock, Activity } from "lucide-react";
 import Link from "next/link";
 
 export default function ContractDetails() {

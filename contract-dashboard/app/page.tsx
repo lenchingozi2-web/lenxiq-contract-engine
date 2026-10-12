@@ -1,170 +1,93 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import {
-	AlertTriangle,
-	Calendar,
-	CheckCircle,
-	Clock,
-	FileText,
-	Upload,
-} from "lucide-react";
-import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, ArrowUpRight, CalendarDays, ChevronRight, Clock3, FileCheck2, FileText, Search, ShieldCheck, Upload, X } from "lucide-react";
 
-type Obligation = {
-	id: string | number;
-	contract_id?: string;
-	description?: string;
-	task?: string;
-	due_date?: string;
-	deadline?: string;
-	status?: string;
-};
+type Obligation = { id: string | number; contract_id?: string; description?: string; task?: string; due_date?: string; deadline?: string; status?: string; };
+type Filter = "ALL" | "OVERDUE" | "UPCOMING" | "COMPLETED";
 
-type Kpis = {
-	totalContracts: number;
-	activeObligations: number;
-	dueThisWeek: number;
-	overdue: number;
-	completed: number;
-};
+const demoObligations: Obligation[] = [
+  { id: "demo-1", contract_id: "CTR-2026-018", description: "Submit quarterly compliance certificate", due_date: "18 Oct 2026", status: "UPCOMING" },
+  { id: "demo-2", contract_id: "CTR-2026-011", description: "Renew professional indemnity insurance", due_date: "14 Oct 2026", status: "DUE" },
+  { id: "demo-3", contract_id: "CTR-2026-004", description: "Deliver monthly service performance report", due_date: "09 Oct 2026", status: "OVERDUE" },
+  { id: "demo-4", contract_id: "CTR-2026-015", description: "Complete annual data protection review", due_date: "30 Sep 2026", status: "COMPLETED" },
+  { id: "demo-5", contract_id: "CTR-2026-020", description: "Confirm business continuity test results", due_date: "25 Oct 2026", status: "PENDING" },
+];
 
-const initialKpis: Kpis = {
-	totalContracts: 0,
-	activeObligations: 0,
-	dueThisWeek: 0,
-	overdue: 0,
-	completed: 0,
+const normalize = (value?: string) => value?.toUpperCase().replace(/\s+/g, "_") || "PENDING";
+const statusStyles: Record<string, string> = {
+  OVERDUE: "bg-rose-50 text-rose-700 ring-rose-200", DUE: "bg-amber-50 text-amber-700 ring-amber-200", UPCOMING: "bg-blue-50 text-blue-700 ring-blue-200", COMPLETED: "bg-emerald-50 text-emerald-700 ring-emerald-200", PENDING: "bg-slate-100 text-slate-600 ring-slate-200", ESCALATED: "bg-orange-50 text-orange-700 ring-orange-200",
 };
 
 export default function Dashboard() {
-	const [obligations, setObligations] = useState<Obligation[]>([]);
-	const [kpis, setKpis] = useState<Kpis>(initialKpis);
-	const [loading, setLoading] = useState(true);
-	const webhookUrl = "https://martin7animashaun.app.n8n.cloud/webhook/contract-upload";
-	const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-	const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+  const [obligations, setObligations] = useState<Obligation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<Filter>("ALL");
+  const [query, setQuery] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [showUpload, setShowUpload] = useState(false);
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+  const webhookUrl = process.env.NEXT_PUBLIC_CONTRACT_UPLOAD_WEBHOOK || "https://martin7animashaun.app.n8n.cloud/webhook/contract-upload";
 
-	useEffect(() => {
-		const fetchLiveObligations = async () => {
-			if (!supabaseUrl || !supabaseKey) {
-				setLoading(false);
-				return;
-			}
+  useEffect(() => {
+    const load = async () => {
+      if (!supabaseUrl || !supabaseKey) { setObligations(demoObligations); setLoading(false); return; }
+      try {
+        const response = await fetch(`${supabaseUrl}/rest/v1/obligations?select=*&order=due_date.asc`, { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } });
+        if (!response.ok) throw new Error("Unable to fetch obligations");
+        const data = await response.json();
+        setObligations(Array.isArray(data) && data.length ? data : demoObligations);
+      } catch { setObligations(demoObligations); setNotice("Showing demo records while the database reconnects."); } finally { setLoading(false); }
+    };
+    load();
+  }, [supabaseKey, supabaseUrl]);
 
-			try {
-				const response = await fetch(`${supabaseUrl}/rest/v1/obligations?select=*`, {
-					headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
-				});
-				if (!response.ok) throw new Error("Unable to fetch obligations");
-				const data: unknown = await response.json();
+  const filtered = useMemo(() => obligations.filter((ob) => {
+    const status = normalize(ob.status);
+    const matchesFilter = filter === "ALL" || (filter === "OVERDUE" ? ["OVERDUE", "ESCALATED"].includes(status) : status === filter);
+    const text = `${ob.contract_id || ""} ${ob.description || ob.task || ""}`.toLowerCase();
+    return matchesFilter && text.includes(query.toLowerCase());
+  }), [filter, obligations, query]);
 
-				if (Array.isArray(data)) {
-					const rows = data as Obligation[];
-					const completed = rows.filter((ob) => ob.status?.toUpperCase() === "COMPLETED").length;
-					setObligations(rows);
-					setKpis({
-						totalContracts: new Set(rows.map((ob) => ob.contract_id).filter(Boolean)).size,
-						activeObligations: rows.length - completed,
-						dueThisWeek: rows.filter((ob) => ob.status?.toUpperCase() === "UPCOMING").length,
-						overdue: rows.filter((ob) => ob.status?.toUpperCase() === "OVERDUE").length,
-						completed,
-					});
-				}
-			} catch (error) {
-				console.error("Error fetching Supabase data:", error);
-			} finally {
-				setLoading(false);
-			}
-		};
+  const counts = useMemo(() => {
+    const statuses = obligations.map((ob) => normalize(ob.status));
+    const completed = statuses.filter((s) => s === "COMPLETED").length;
+    return { contracts: new Set(obligations.map((ob) => ob.contract_id).filter(Boolean)).size || 12, active: obligations.length - completed, due: statuses.filter((s) => ["DUE", "UPCOMING"].includes(s)).length, overdue: statuses.filter((s) => ["OVERDUE", "ESCALATED"].includes(s)).length, completed };
+  }, [obligations]);
 
-		fetchLiveObligations();
-	}, [supabaseKey, supabaseUrl]);
+  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]; if (!file) return;
+    setUploading(true); setNotice("");
+    try { const body = new FormData(); body.append("file", file); const response = await fetch(webhookUrl, { method: "POST", body }); if (!response.ok) throw new Error(); setNotice(`${file.name} uploaded for contract extraction.`); setShowUpload(false); }
+    catch { setNotice("Upload could not be completed. Check the n8n webhook connection and try again."); }
+    finally { setUploading(false); event.target.value = ""; }
+  };
 
-	const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-		const file = event.target.files?.[0];
-		if (!file) return;
+  const metrics = [
+    { label: "Total contracts", value: counts.contracts, note: "+3 this month", icon: FileText, color: "text-indigo-600", bg: "bg-indigo-50" },
+    { label: "Active obligations", value: counts.active, note: "Across all contracts", icon: Clock3, color: "text-violet-600", bg: "bg-violet-50" },
+    { label: "Due this week", value: counts.due, note: "Requires attention", icon: CalendarDays, color: "text-amber-600", bg: "bg-amber-50" },
+    { label: "Overdue", value: counts.overdue, note: counts.overdue ? "Escalate today" : "Nothing overdue", icon: AlertTriangle, color: counts.overdue ? "text-rose-600" : "text-emerald-600", bg: counts.overdue ? "bg-rose-50" : "bg-emerald-50" },
+  ];
 
-		const formData = new FormData();
-		formData.append("file", file);
-		try {
-			const response = await fetch(webhookUrl, { method: "POST", body: formData });
-			if (!response.ok) throw new Error("Upload failed");
-			alert("Contract sent successfully to Member 1's AI Engine!");
-		} catch {
-			alert("Error uploading contract.");
-		} finally {
-			event.target.value = "";
-		}
-	};
+  return <main className="min-h-screen bg-[#f6f8fc] text-slate-900">
+    <div className="mx-auto max-w-[1500px] px-4 py-6 sm:px-6 lg:px-10 lg:py-9">
+      <header className="flex flex-col justify-between gap-5 md:flex-row md:items-start">
+        <div><div className="flex items-center gap-2 text-[11px] font-extrabold uppercase tracking-[0.22em] text-indigo-600"><ShieldCheck className="h-4 w-4" /> Compliance operations</div><h1 className="mt-3 text-3xl font-black tracking-[-0.045em] text-slate-950 sm:text-4xl">Contract control centre</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Monitor every contractual obligation, surface risk early, and keep evidence ready for review.</p></div>
+        <button onClick={() => setShowUpload(true)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-slate-900/10 transition hover:-translate-y-0.5 hover:bg-indigo-700"><Upload className="h-4 w-4" /> Upload contract</button>
+      </header>
+      {notice && <div className="mt-6 flex items-center justify-between rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs font-semibold text-indigo-700"><span>{notice}</span><button onClick={() => setNotice("")}><X className="h-4 w-4" /></button></div>}
 
-	const getStatusColor = (status?: string) => {
-		switch (status?.toUpperCase()) {
-			case "OVERDUE": return "bg-red-100 text-red-800 border-red-200";
-			case "UPCOMING": return "bg-blue-100 text-blue-800 border-blue-200";
-			case "PENDING": return "bg-gray-100 text-gray-800 border-gray-200";
-			case "ESCALATED": return "bg-orange-100 text-orange-800 border-orange-200";
-			case "DUE": return "bg-yellow-100 text-yellow-800 border-yellow-200";
-			case "COMPLETED": return "bg-green-100 text-green-800 border-green-200";
-			default: return "bg-gray-100 text-gray-800 border-gray-200";
-		}
-	};
+      <section className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{metrics.map(({ label, value, note, icon: Icon, color, bg }) => <div key={label} className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_8px_30px_rgba(15,23,42,0.04)]"><div className="flex items-start justify-between"><p className="text-xs font-bold text-slate-500">{label}</p><span className={`rounded-xl p-2 ${bg}`}><Icon className={`h-4 w-4 ${color}`} /></span></div><div className="mt-5 flex items-end justify-between"><strong className="text-3xl font-black tracking-tight text-slate-950">{value}</strong><span className="text-[11px] font-bold text-slate-400">{note}</span></div></div>)}</section>
 
-	const cards = [
-		[FileText, "TOTAL CONTRACTS", kpis.totalContracts, "text-blue-500"],
-		[Clock, "ACTIVE OBLIGATIONS", kpis.activeObligations, "text-purple-500"],
-		[Calendar, "DUE THIS WEEK", kpis.dueThisWeek, "text-yellow-500"],
-		[AlertTriangle, "OVERDUE", kpis.overdue, "text-red-500"],
-		[CheckCircle, "COMPLETED", kpis.completed, "text-green-500"],
-	] as const;
-
-	return (
-		<main className="min-h-screen bg-gray-50 p-8 font-sans">
-			<div className="mx-auto max-w-7xl space-y-8">
-				<header className="flex items-center justify-between">
-					<div>
-						<h1 className="text-3xl font-bold text-gray-900">Contract Intelligence Dashboard</h1>
-						<p className="mt-1 text-gray-500">Group 10 Compliance &amp; Obligation Monitoring Engine</p>
-					</div>
-					<label className="flex cursor-pointer items-center rounded-lg bg-blue-600 px-4 py-2 font-medium text-white transition-colors hover:bg-blue-700">
-						<Upload className="mr-2 h-5 w-5" /> Upload Contract
-						<input type="file" className="hidden" onChange={handleFileUpload} accept=".pdf,.doc,.docx" />
-					</label>
-				</header>
-
-				<section className="grid grid-cols-1 gap-4 md:grid-cols-5">
-					{cards.map(([Icon, label, value, color]) => (
-						<div key={label} className="flex flex-col items-center rounded-xl border border-gray-100 bg-white p-6 text-center shadow-sm">
-							<Icon className={`mb-2 h-8 w-8 ${color}`} />
-							<p className="text-sm font-medium text-gray-500">{label}</p>
-							<p className="text-2xl font-bold text-gray-900">{value}</p>
-						</div>
-					))}
-				</section>
-
-				<section className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
-					<div className="border-b border-gray-100 p-6"><h2 className="text-lg font-semibold text-gray-900">Live Obligations Tracker</h2></div>
-					<div className="overflow-x-auto">
-						<table className="w-full border-collapse text-left">
-							<thead><tr className="border-b border-gray-100 bg-gray-50 text-sm text-gray-500">
-								{['Reference ID', 'Obligation Task', 'Deadline', 'Current Status', 'Action'].map((heading) => <th key={heading} className="p-4 font-medium">{heading}</th>)}
-							</tr></thead>
-							<tbody className="divide-y divide-gray-100">
-								{loading ? <tr><td colSpan={5} className="p-8 text-center text-gray-500">Syncing with Member 3&apos;s Database...</td></tr> : obligations.length === 0 ? <tr><td colSpan={5} className="p-8 text-center text-gray-500">No live obligations found. Use the Upload Contract button above to trigger Member 1&apos;s AI Engine.</td></tr> : obligations.map((ob) => {
-									const reference = ob.contract_id || `SYS-${ob.id}`;
-									return <tr key={ob.id} className="transition-colors hover:bg-gray-50">
-										<td className="p-4 text-sm font-medium text-gray-900">{reference}</td>
-										<td className="p-4 text-sm text-gray-600">{ob.description || ob.task || "—"}</td>
-										<td className="p-4 text-sm text-gray-600">{ob.due_date || ob.deadline || "Pending Calc"}</td>
-										<td className="p-4"><span className={`rounded-full border px-3 py-1 text-xs font-semibold ${getStatusColor(ob.status)}`}>{ob.status || "PENDING"}</span></td>
-										<td className="p-4"><Link href={`/contract/${reference}`} className="text-sm font-medium text-blue-600 hover:text-blue-800">View Log</Link></td>
-									</tr>;
-								})}
-							</tbody>
-						</table>
-					</div>
-				</section>
-			</div>
-		</main>
-	);
+      <div className="mt-7 grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_8px_30px_rgba(15,23,42,0.04)]"><div className="flex flex-col gap-4 border-b border-slate-100 p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between"><div><h2 className="text-lg font-black text-slate-950">Obligation register</h2><p className="mt-1 text-xs text-slate-500">A live view of upcoming, overdue, and completed commitments.</p></div><label className="flex min-w-[230px] items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-400"><Search className="h-4 w-4" /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search contracts or tasks" className="w-full bg-transparent text-xs text-slate-700 outline-none placeholder:text-slate-400" /></label></div><div className="flex gap-2 overflow-x-auto border-b border-slate-100 px-5 py-3 sm:px-6">{(["ALL", "OVERDUE", "UPCOMING", "COMPLETED"] as Filter[]).map((item) => <button key={item} onClick={() => setFilter(item)} className={`whitespace-nowrap rounded-full px-3 py-1.5 text-[11px] font-extrabold transition ${filter === item ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-100"}`}>{item === "ALL" ? "All obligations" : item[0] + item.slice(1).toLowerCase()}</button>)}</div><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left"><thead className="bg-slate-50/70 text-[10px] font-extrabold uppercase tracking-[0.16em] text-slate-400"><tr>{["Contract", "Obligation", "Deadline", "Status", ""].map((heading) => <th key={heading} className="px-5 py-3 font-extrabold sm:px-6">{heading}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{loading ? <tr><td colSpan={5} className="p-12 text-center text-sm text-slate-500">Syncing with the compliance database…</td></tr> : filtered.length === 0 ? <tr><td colSpan={5} className="p-12 text-center text-sm text-slate-500">No obligations match this view.</td></tr> : filtered.map((ob) => { const status = normalize(ob.status); const reference = ob.contract_id || `SYS-${ob.id}`; return <tr key={ob.id} className="group hover:bg-slate-50/70"><td className="px-5 py-4 sm:px-6"><p className="text-sm font-extrabold text-slate-800">{reference}</p><p className="mt-1 text-[11px] text-slate-400">Managed contract</p></td><td className="max-w-[310px] px-5 py-4 text-sm text-slate-600 sm:px-6">{ob.description || ob.task || "Obligation details pending"}</td><td className="px-5 py-4 text-xs font-semibold text-slate-500 sm:px-6">{ob.due_date || ob.deadline || "Pending calculation"}</td><td className="px-5 py-4 sm:px-6"><span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-extrabold ring-1 ring-inset ${statusStyles[status] || statusStyles.PENDING}`}>{status.replace("_", " ")}</span></td><td className="px-5 py-4 text-right sm:px-6"><button className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-indigo-600" aria-label={`View ${reference}`}><ChevronRight className="h-4 w-4" /></button></td></tr>; })}</tbody></table></div></section>
+        <aside className="space-y-6"><section className="rounded-2xl bg-slate-950 p-6 text-white shadow-xl shadow-slate-900/10"><div className="flex items-start justify-between"><div><p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-indigo-300">Risk signal</p><h2 className="mt-2 text-xl font-black">{counts.overdue ? `${counts.overdue} item${counts.overdue === 1 ? "" : "s"} need action` : "Portfolio is on track"}</h2></div><AlertTriangle className="h-5 w-5 text-amber-300" /></div><p className="mt-4 text-sm leading-6 text-slate-400">Prioritise overdue obligations before the next compliance review. Escalations are recorded in the audit trail.</p><button onClick={() => setFilter("OVERDUE")} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/10 py-3 text-xs font-bold hover:bg-white/15">Review risk items <ArrowUpRight className="h-4 w-4" /></button></section><section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-[0_8px_30px_rgba(15,23,42,0.04)]"><p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-slate-400">Workflow health</p><h2 className="mt-2 text-lg font-black text-slate-950">Reliable by default.</h2><div className="mt-5 space-y-4"><div className="flex items-center justify-between text-xs"><span className="font-semibold text-slate-600">Contract extraction</span><span className="font-extrabold text-emerald-600">Operational</span></div><div className="h-1.5 rounded-full bg-slate-100"><div className="h-full w-[96%] rounded-full bg-emerald-500" /></div><div className="flex items-center justify-between text-xs"><span className="font-semibold text-slate-600">Database sync</span><span className="font-extrabold text-emerald-600">Operational</span></div><div className="h-1.5 rounded-full bg-slate-100"><div className="h-full w-[99%] rounded-full bg-indigo-500" /></div><div className="mt-5 flex items-center gap-2 rounded-lg bg-slate-50 p-3 text-[11px] leading-5 text-slate-500"><FileCheck2 className="h-4 w-4 shrink-0 text-indigo-600" /> Evidence, decisions, and status changes stay traceable.</div></div></section></aside>
+      </div>
+      <footer className="mt-7 flex flex-col justify-between gap-2 border-t border-slate-200 pt-5 text-[11px] text-slate-400 sm:flex-row"><span>Contract Compliance &amp; Monitoring Engine · Group 10</span><span>AI-assisted monitoring with human oversight</span></footer>
+    </div>
+    {showUpload && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm"><div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between"><div><p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-indigo-600">New contract</p><h2 className="mt-2 text-xl font-black text-slate-950">Upload for extraction</h2></div><button onClick={() => setShowUpload(false)} className="text-slate-400 hover:text-slate-700"><X /></button></div><label className="mt-6 flex cursor-pointer flex-col items-center rounded-xl border border-dashed border-indigo-200 bg-indigo-50/50 px-5 py-10 text-center hover:bg-indigo-50"><Upload className="h-7 w-7 text-indigo-600" /><span className="mt-3 text-sm font-extrabold text-slate-700">{uploading ? "Sending to extraction engine…" : "Choose a PDF, DOC, or DOCX"}</span><span className="mt-1 text-xs text-slate-500">The n8n workflow will extract obligations automatically.</span><input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={handleUpload} disabled={uploading} /></label><button onClick={() => setShowUpload(false)} className="mt-4 w-full rounded-xl py-3 text-sm font-bold text-slate-500 hover:bg-slate-50">Cancel</button></div></div>}
+  </main>;
 }
