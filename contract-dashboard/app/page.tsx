@@ -29,7 +29,7 @@ export default function Dashboard() {
   const [showUpload, setShowUpload] = useState(false);
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-  const webhookUrl = process.env.NEXT_PUBLIC_CONTRACT_UPLOAD_WEBHOOK || "https://martin7animashaun.app.n8n.cloud/webhook/contract-upload";
+  const webhookUrl = process.env.NEXT_PUBLIC_WEBHOOK_URL || "https://capstone-monitor.app.n8n.cloud/webhook/contract-intake";
 
   useEffect(() => {
     const load = async () => {
@@ -60,8 +60,27 @@ export default function Dashboard() {
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]; if (!file) return;
     setUploading(true); setNotice("");
-    try { const body = new FormData(); body.append("file", file); const response = await fetch(webhookUrl, { method: "POST", body }); if (!response.ok) throw new Error(); setNotice(`${file.name} uploaded for contract extraction.`); setShowUpload(false); }
-    catch { setNotice("Upload could not be completed. Check the n8n webhook connection and try again."); }
+    try {
+      const baseName = file.name.replace(/\.[^/.]+$/, "").trim() || "Uploaded contract";
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const body = {
+        candidateId: `web-upload-${id}`,
+        contractId: `upload-${id}`,
+        contractName: baseName,
+        partyName: "Uploaded document",
+        resumeUrl: `uploaded://${encodeURIComponent(file.name)}`,
+        effectiveDate: null,
+        expirationDate: null,
+        nextDeadline: null,
+        sourceFileName: file.name,
+        sourceMimeType: file.type || "application/octet-stream",
+        sourceSize: file.size,
+      };
+      const response = await fetch(webhookUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (!response.ok) throw new Error();
+      setNotice(`${file.name} was accepted and sent to the compliance workflow.`);
+      setShowUpload(false);
+    } catch { setNotice("Upload could not be completed. Check the n8n webhook connection and try again."); }
     finally { setUploading(false); event.target.value = ""; }
   };
 
