@@ -6,15 +6,13 @@ import { AlertTriangle, ArrowUpRight, CalendarDays, ChevronRight, Clock3, FileCh
 type Obligation = { id: string | number; contract_id?: string; description?: string; task?: string; due_date?: string; deadline?: string; status?: string; };
 type Filter = "ALL" | "OVERDUE" | "UPCOMING" | "COMPLETED";
 
-const demoObligations: Obligation[] = [
-  { id: "demo-1", contract_id: "CTR-2026-018", description: "Submit quarterly compliance certificate", due_date: "18 Oct 2026", status: "UPCOMING" },
-  { id: "demo-2", contract_id: "CTR-2026-011", description: "Renew professional indemnity insurance", due_date: "14 Oct 2026", status: "DUE" },
-  { id: "demo-3", contract_id: "CTR-2026-004", description: "Deliver monthly service performance report", due_date: "09 Oct 2026", status: "OVERDUE" },
-  { id: "demo-4", contract_id: "CTR-2026-015", description: "Complete annual data protection review", due_date: "30 Sep 2026", status: "COMPLETED" },
-  { id: "demo-5", contract_id: "CTR-2026-020", description: "Confirm business continuity test results", due_date: "25 Oct 2026", status: "PENDING" },
-];
-
 const normalize = (value?: string) => value?.toUpperCase().replace(/\s+/g, "_") || "PENDING";
+const liveStatus = (status?: string, dueDate?: string) => {
+  const normalized = normalize(status);
+  if (["COMPLETED", "OVERDUE", "ESCALATED", "DUE"].includes(normalized)) return normalized;
+  if (dueDate) return new Date(`${dueDate}T23:59:59`).getTime() < Date.now() ? "OVERDUE" : "UPCOMING";
+  return normalized;
+};
 const statusStyles: Record<string, string> = {
   OVERDUE: "bg-rose-50 text-rose-700 ring-rose-200", DUE: "bg-amber-50 text-amber-700 ring-amber-200", UPCOMING: "bg-blue-50 text-blue-700 ring-blue-200", COMPLETED: "bg-emerald-50 text-emerald-700 ring-emerald-200", PENDING: "bg-slate-100 text-slate-600 ring-slate-200", ESCALATED: "bg-orange-50 text-orange-700 ring-orange-200",
 };
@@ -33,13 +31,20 @@ export default function Dashboard() {
 
   useEffect(() => {
     const load = async () => {
-      if (!supabaseUrl || !supabaseKey) { setObligations(demoObligations); setLoading(false); return; }
+      if (!supabaseUrl || !supabaseKey) { setObligations([]); setNotice("Live database configuration is unavailable."); setLoading(false); return; }
       try {
-        const response = await fetch(`${supabaseUrl}/rest/v1/obligations?select=*&order=due_date.asc`, { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } });
-        if (!response.ok) throw new Error("Unable to fetch obligations");
+        const response = await fetch(`${supabaseUrl}/rest/v1/contracts?select=id,contract_id,contract_name,party_name,next_deadline,status,risk_level,created_at&order=next_deadline.asc.nullslast,created_at.desc`, { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } });
+        if (!response.ok) throw new Error("Unable to fetch contracts");
         const data = await response.json();
-        setObligations(Array.isArray(data) && data.length ? data : demoObligations);
-      } catch { setObligations(demoObligations); setNotice("Showing demo records while the database reconnects."); } finally { setLoading(false); }
+        const liveRows: Obligation[] = Array.isArray(data) ? data.map((contract) => ({
+          id: contract.id,
+          contract_id: contract.contract_id,
+          description: contract.contract_name || contract.party_name || "Contract obligation review",
+          due_date: contract.next_deadline || undefined,
+          status: liveStatus(contract.status, contract.next_deadline),
+        })) : [];
+        setObligations(liveRows);
+      } catch { setObligations([]); setNotice("Live database could not be reached. Please refresh and try again."); } finally { setLoading(false); }
     };
     load();
   }, [supabaseKey, supabaseUrl]);
